@@ -6,16 +6,19 @@ import {
   Patch,
   Param,
   Delete,
+  UseGuards,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { RequestUserDto } from './dto/request-user.dto';
 import { ResponseUserDTO } from './dto/response-user.dto';
 import { UserEntity } from './entities/user.entity';
+import { UsersGuard } from 'src/auth/users.guard';
 
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
+  @UseGuards(UsersGuard)
   @Post()
   async create(@Body() createUserDto: RequestUserDto) {
     const createdUser = await this.usersService.create(createUserDto);
@@ -23,6 +26,7 @@ export class UsersController {
     return new ResponseUserDTO(createdUser);
   }
 
+  @UseGuards(UsersGuard)
   @Get()
   async findAll() {
     const allUsers = await this.usersService.findAll();

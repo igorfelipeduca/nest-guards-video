@@ -1,218 +1,153 @@
-# Nest + Docker + PGSQL + TypeOrm
+# NestJs Guards Tutorial
 
-- [x] Init Nest project
-- [x] Create Dockerfile
-- [x] Create docker-compose.yml
-- [x] Create .dockerignore
-- [x] Build the containers
-- [x] Setting up the PG database
-- [x] Install the TypeORM dependencies
-- [x] Import TypeORM at the app.module.ts
-- [x] Create a new REST module
-- [x] Create the user entity
-- [x] Inject the user entity on the TypeORMModule (users.module.ts)
-- [x] Create the request and response DTOs
-- [x] Apply the DTOs on the controllers
-- [x] Apply the DTOs on the services
+This repository illustrates a YouTube video tutorial on how to use NestJs Guards with TypeORM and JWT.
 
-## Initiating a new Nest project
+## Prerequisites
 
-```bash
-nest new project-name
+- Node.js v18.x
+- Docker
+
+## Installation
+
+1. Clone the repository
+2. Run `npm install` to install the dependencies
+3. Run `npm run start:docker` to start the application
+4. Open http://localhost:9090 in your browser
+
+## NestJs Guards Base Usage
+
+```typescript
+import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
+
+@Injectable()
+export class AuthGuard implements CanActivate {
+  canActivate(context: ExecutionContext): boolean {
+    const request = context.switchToHttp().getRequest();
+    const user = request.user;
+
+    return !!user;
+  }
+}
 ```
 
-## Creating the Dockerfile
+## Using a Guard
 
-```Dockerfile
-FROM node:18
+```typescript
+import { Injectable, UseGuards } from '@nestjs/common';
+import { AuthGuard } from './auth.guard';
 
-WORKDIR /app
-
-COPY package*.json ./
-
-RUN npm install
-
-COPY . .
-
-RUN npm run build
-
-CMD [ "npm", "run", "start:dev"
+@Injectable()
+@UseGuards(AuthGuard)
+export class UserController {}
 ```
 
-## Create docker-compose.yml
+## JWT Service Base Usage
 
-```docker-compose.yml
-version: '3.5'
+```typescript
+import { HttpException, Injectable } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { UsersService } from 'src/users/users.service';
 
-services:
-  db:
-    image: postgres
-    restart: always
-    environment:
-      - POSTGRES_PASSWORD=postgres
-    container_name: postgres
-    volumes:
-      - ./pgdata:/var/lib/postgresql/data
-    ports:
-      - '7654:7654'
+@Injectable()
+export class AuthService {
+  constructor(
+    private readonly jwtService: JwtService,
+    private readonly usersService: UsersService,
+  ) {}
 
-  app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: nest-docker-postgres
-    environment:
-      - PORT=${PORT}
-    ports:
-      - '3000:3000'
-    depends_on:
-      - db
-    volumes:
-      - ./src:/app/src
-
-  pgadmin:
-    image: dpage/pgadmin4
-    restart: always
-    container_name: nest-pgadmin4
-    environment:
-      - PGADMIN_DEFAULT_EMAIL=admin@admin.com
-      - PGADMIN_DEFAULT_PASSWORD=pgadmin4
-    ports:
-      - '5050:80'
-    depends_on:
-      - db
+  async signIn(username, pass) {
+    const user = await this.usersService.findOne(username);
+    if (user?.password !== pass) {
+      throw new HttpException('Invalid username or password', 401);
+    }
+    const payload = { email: user.email, sub: user.id };
+    return {
+      access_token: await this.jwtService.signAsync(payload),
+    };
+  }
+}
 ```
 
-## Creating .dockerignore
-
-```dockerignore
-Dockerfile
-.dockerignore
-node_modules
-npm-debug.log
-dist
-```
-
-
-## Building the containers
-
-```bash
-docker compose up --build
-```
-
-## Setting up the PG database
-
-To set up your Postgres database you must access `http://localhost:5050` (pgadmin) and log in using the credentials you have specified at the `docker-compose.yml` file.
-
-In this case, we are going to use the following credentials:
-
-```.env
-EMAIL=admin@admin.com
-PASSWORD=pgadmin4
-```
-
-After logging in, you must create a new server (Right click Servers > Register > Server), go to the Connection tab and fill in the following fields:
-
-```
-Host name/address: db
-Port: 5432
-Maintenance database: postgres
-Username: postgres
-Password: postgres
-```
-
-## Installing the TypeORM dependencies
-
-```bash
-npm install @nestjs/typeorm typeorm pg class-validators
-```
-
-## Importing TypeORM at the app.module.ts
+## Implementing the JWT Service at app.module.ts (Example)
 
 ```typescript app.module.ts
-imports: [
-  TypeOrmModule.forRoot({
-    type: 'postgres',
-    host: 'db',
-    port: 5432,
-    username: 'postgres',
-    password: 'postgres',
-    database: 'postgres',
-    entities: [],
-    synchronize: true,
-    autoLoadEntities: true,
-  }),
-],
+import { Module } from '@nestjs/common';
+import { AuthService } from './auth.service';
+import { UsersModule } from '../users/users.module';
+import { JwtModule } from '@nestjs/jwt';
+import { AuthController } from './auth.controller';
+import { jwtConstants } from './constants';
+
+@Module({
+  imports: [
+    UsersModule,
+    JwtModule.register({
+      global: true,
+      secret: jwtConstants.secret,
+      signOptions: { expiresIn: '60s' },
+    }),
+  ],
+  providers: [AuthService],
+  controllers: [AuthController],
+  exports: [AuthService],
+})
+export class AuthModule {}
 ```
 
-## Creating a new REST module for Users
+## Auth Controller
 
-```bash
-nest g rest users
-```
+```typescript auth.controller.ts
+import { Body, Controller, Post } from '@nestjs/common';
+import { AuthService } from './auth.service';
 
-## Creating the user entity
+@Controller('auth')
+export class AuthController {
+  constructor(private readonly authService: AuthService) {}
 
-```typescript user.entity.ts
-import { Entity, Column, PrimaryGeneratedColumn } from 'typeorm';
-
-@Entity()
-export class UserEntity {
-  @PrimaryGeneratedColumn()
-  id: number;
-
-  @Column()
-  firstName: string;
-
-  @Column()
-  lastName: string;
-
-  @Column({ default: true })
-  isActive: boolean;
+  @Post('login')
+  signIn(@Body() signInDto: { email: string; password: string }) {
+    return this.authService.signIn(signInDto);
+  }
 }
 ```
 
-## Injecting the user entity on the TypeORMModule (users.module.ts)
+## Jwt + Guard Implementation
 
-```typescript users.module.ts
-imports: [TypeOrmModule.forFeature([UserEntity])],
-```
+```typescript auth.guard.ts
+import {
+  CanActivate,
+  ExecutionContext,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { Request } from 'express';
 
-## Creating the request DTO
+@Injectable()
+export class AuthGuard implements CanActivate {
+  constructor(private jwtService: JwtService) {}
 
-```typescript request-user.dto.ts
-import { IsBoolean, IsNotEmpty, IsString } from 'class-validator';
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const request = context.switchToHttp().getRequest();
+    const token = this.extractTokenFromHeader(request);
+    if (!token) {
+      throw new UnauthorizedException();
+    }
+    try {
+      const payload = await this.jwtService.verifyAsync(token, {
+        secret: process.env.JWT_SECRET ?? 'secret',
+      });
 
-export class CreateUserDto {
-  @IsString()
-  @IsNotEmpty()
-  firstName: string;
+      request['user'] = payload;
+    } catch {
+      throw new UnauthorizedException();
+    }
+    return true;
+  }
 
-  @IsString()
-  @IsNotEmpty()
-  lastName: string;
-
-  @IsBoolean()
-  isActive: boolean;
-}
-```
-
-## Creating the response DTO
-
-```typescript response-user.dto.ts
-import { UserEntity } from './../entities/user.entity';
-
-export class ResponseUserDTO {
-  id: number;
-  firstName: string;
-  lastName: string;
-  isActive: boolean;
-
-  constructor(user: Partial<UserEntity>) {
-    this.id = user.id;
-    this.firstName = user.firstName;
-    this.lastName = user.lastName;
-    this.isActive = user.isActive;
+  private extractTokenFromHeader(request: Request): string | undefined {
+    const [type, token] = request.headers.authorization?.split(' ') ?? [];
+    return type === 'Bearer' ? token : undefined;
   }
 }
 ```
